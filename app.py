@@ -8,9 +8,19 @@ from db_mongo import DB_Handler
 
 st.set_page_config(layout = "wide")
 
-authenticator = stauth.Authenticate(
-    credentials = './.streamlit/credentials.yaml'
-)
+env = 'prod'
+
+if env == 'dev':
+    authenticator = stauth.Authenticate(
+        credentials = './.streamlit/credentials.yaml'
+    )
+elif env == 'prod':
+    authenticator = stauth.Authenticate(
+        credentials = st.secrets['credentials'].to_dict(),
+        cookie_name = st.secrets['cookie']['name'],
+        cookie_key = st.secrets['cookie']['key'],
+        cookie_expiry_days = st.secrets['cookie']['expiry_days']
+    )
 st.session_state["authenticator"] = authenticator
 
 try:
@@ -71,7 +81,7 @@ if st.session_state.get('authentication_status'):
         position = 'top'
     )
 else:
-    pg = st.navigation([st.Page("pages/settings.py")], position = 'sidebar')
+    pg = st.navigation([st.Page("pages/settings.py")], position = 'top')
 
 if 'selected_tool' in st.session_state and st.session_state['selected_tool'] is not None:
     with st.sidebar:
