@@ -54,7 +54,7 @@ class DB_Handler():
 		return
 
 	def get_client(self) -> MongoClient:
-		DB_USERNAME = urllib.parse.quote_plus(st,secrets['mongo_username'])
+		DB_USERNAME = urllib.parse.quote_plus(st.secrets['mongo_username'])
 		DB_PASSWORD = urllib.parse.quote_plus(st.secrets['mongo_password'])
 		DB_CLUSTER = urllib.parse.quote_plus(st.secrets['mongo_cluster'])
 		DB_APPNAME = urllib.parse.quote_plus(st.secrets['mongo_appname'])

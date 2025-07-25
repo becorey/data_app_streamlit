@@ -1,5 +1,6 @@
 import os
 import datetime
+from zoneinfo import ZoneInfo
 
 def split_path(path):
     """
@@ -19,3 +20,12 @@ def seconds_to_string(seconds):
         return str(int(minutes)) + 'm ' + str(int(seconds)) + 's'
     hours, minutes = divmod(minutes, 60)
     return str(int(hours)) + 'h ' + str(int(minutes)) + 'm ' + str(int(seconds)) + 's'
+
+
+def timestamp_to_str(timestamp, timezone):
+    try:
+        utc_time = datetime.datetime.fromtimestamp(timestamp)
+    except IndexError:
+        return 'date_error'
+    local_time = utc_time.astimezone(ZoneInfo(timezone))
+    return local_time.strftime('%Y-%m-%d %I:%M:%S %p')

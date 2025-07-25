@@ -1,10 +1,12 @@
 import os
+import streamlit as st
 
 import pandas as pd
 import numpy as np
 import datetime
 from zoneinfo import ZoneInfo
 
+import functions
 from functions import split_path, seconds_to_string
 import data_from_cloud
 import bigquery
@@ -28,6 +30,7 @@ def timestamp_from_filename(filename):
 	return timestamp
 
 
+@st.cache_data
 def events_df_by_id_and_date_range(
 		datalogger_id,
 		start_date, end_date, timezone = 'US/Central',
@@ -50,6 +53,67 @@ def events_df_by_id_and_date_range(
 	return rows.to_dataframe()
 
 
+@st.cache_data
+def events_df_recent(limit = 100, start_date = None, end_date = None, select = None):
+	if select is None:
+		select = ['*']
+
+	where = list()
+	if start_date:
+		where.append(('date', '>=', start_date))
+	if end_date:
+		where.append(('date', '<=', end_date))
+	rows = bigquery.find(
+		select,
+		where = where,
+		order = [('timestamp', 'desc')],
+		table = 'events',
+		limit = limit
+	)
+
+	return rows.to_dataframe()
+
+
+def combine_events(df, timeout_s = 60):
+	"""
+	:param df: from events_df_by_id_and_date_range
+	:return:
+	"""
+	df['end_timestamp'] = df['timestamp'] + df['duration']
+	df['time_to_next'] = df['timestamp'].shift(-1) - df['end_timestamp']
+	df['time_to_next'] = df['time_to_next'].fillna(60 * 60 * 24)
+
+	df['charging'] = (df['avgCurrent'] < 0)
+
+	# find indexes to split sessions
+	# based on exceeding the session_timeout
+	idx = np.append([0], np.where(df['time_to_next'] > timeout_s))
+
+	# split df to list of dfs based on session indexes
+	# https://stackoverflow.com/a/53395439/2666454
+	dfs_by_session = [df.iloc[idx[n] + 1:idx[n + 1] + 1] for n in range(len(idx) - 1)]
+
+	df_return = pd.DataFrame()
+	for dfi in dfs_by_session:
+		if dfi.empty:
+			continue
+		duration_sum = dfi['duration'].sum()
+		start_timestamp = dfi['timestamp'].iloc[0]
+		row = pd.DataFrame([{
+			'Time (UTC)': functions.timestamp_to_str(start_timestamp, 'UTC'),
+			#'timestamp': dfi['timestamp'].iloc[0],
+			'Duration': functions.seconds_to_string(duration_sum),
+			'Duration (s)': duration_sum,
+			'Energy (Wh)': dfi['energy'].sum(),
+			'date': dfi['date'].iloc[0],
+			'filenames': dfi['filename'].tolist()
+		}])
+		df_return = pd.concat([df_return, row], ignore_index = True)
+
+	df_return['Duration (s)'] = df_return['Duration (s)'].astype('float64')
+	df_return['Energy (Wh)'] = df_return['Energy (Wh)'].astype('float64')
+	return df_return
+
 def event_by_filename(cloud_filename, timezone):
 	rows = bigquery.find(
 		['*'],
@@ -59,6 +123,48 @@ def event_by_filename(cloud_filename, timezone):
 		return Event(row, timezone)
 	return
 
+
+def harmonize_columns(df):
+	""" harmonize column names across different datalogger versions """
+	df
+	if all([x in df.columns for x in ['dt (us)', 'current (A)', 'voltage (V)']]):
+		# V5
+		df['t (s)'] = df['dt (us)'].cumsum() / 1e6
+		df['dt (s)'] = df['dt (us)'] / 1e6
+		df['power (W)'] = df['voltage (V)'] * df['current (A)']
+		df['delta energy (J)'] = df['power (W)'] * df['dt (us)'] * 1e-6
+		df['energy (J)'] = df['delta energy (J)'].cumsum()
+
+	elif all([x in df.columns for x in ['t (s)', 'VBUS (V)', 'CURRENT (A)', 'DIETEMP (deg C)', 'ENERGY (J)']]):
+		# V6
+		df = df.rename(columns = {
+			'VBUS (V)': 'voltage (V)',
+			'CURRENT (A)': 'current (A)',
+			'DIETEMP (deg C)': 'temperature (deg C)',
+			'ENERGY (J)': 'energy (J)'
+		})
+		df['delta energy (J)'] = df['energy (J)'].diff().fillna(0).round(6)
+		df['power (W)'] = (df['voltage (V)'] * df['current (A)']).round(6)
+		df['dt (s)'] = df['t (s)'].diff().fillna(0)
+		df.loc[df['dt (s)'] < 0, 'dt (s)'] = 0
+	else:
+		return None
+
+	return df
+
+
+def fix_energy_values(df):
+	# correct energy for negative current values
+	df['delta energy (J)'] = df['delta energy (J)'].abs()
+	sign_current = np.sign(df['current (A)'])
+	df['delta energy (J)'] = df['delta energy (J)'] * sign_current
+	df['energy (J)'] = df['delta energy (J)'].cumsum()
+
+	# add energy unit Wh from J
+	df['energy (Wh)'] = (df['energy (J)'] / 3600).round(6)
+	df['delta energy (Wh)'] = df['energy (Wh)'].diff().fillna(0).round(6)
+
+	return df
 
 class Event:
 	def __init__(self, row, timezone):
@@ -105,41 +211,6 @@ class Event:
 		self.df['t (s)'] = self.df['t (s)'] + self.timestamp
 		return
 
-	def harmonize_columns(self):
-		""" harmonize column names across different datalogger versions """
-		df = self.df
-		if all([x in df.columns for x in ['dt (us)', 'current (A)', 'voltage (V)']]):
-			# V5
-			df['t (s)'] = df['dt (us)'].cumsum() / 1e6
-			df['dt (s)'] = df['dt (us)'] / 1e6
-			df['power (W)'] = df['voltage (V)'] * df['current (A)']
-			df['delta energy (J)'] = df['power (W)'] * df['dt (us)'] * 1e-6
-			df['energy (J)'] = df['delta energy (J)'].cumsum()
-
-		elif all([x in df.columns for x in ['t (s)', 'VBUS (V)', 'CURRENT (A)', 'DIETEMP (deg C)', 'ENERGY (J)']]):
-			# V6
-			df = df.rename(columns = {'VBUS (V)': 'voltage (V)', 'CURRENT (A)': 'current (A)',
-									  'DIETEMP (deg C)': 'temperature (deg C)', 'ENERGY (J)': 'energy (J)'})
-			df['delta energy (J)'] = df['energy (J)'].diff().fillna(0).round(6)
-			df['power (W)'] = (df['voltage (V)'] * df['current (A)']).round(6)
-			df['dt (s)'] = df['t (s)'].diff().fillna(0)
-			df.loc[df['dt (s)'] < 0, 'dt (s)'] = 0
-
-		else:
-			return None
-
-		# correct energy for negative current values
-		df['energy (J)'] = df['energy (J)'].abs()
-		sign_current = np.sign(df['current (A)'])
-		df['delta energy (J)'] = df['delta energy (J)'] * sign_current
-		df['energy (J)'] = df['delta energy (J)'].cumsum()
-
-		# add energy unit Wh from J
-		df['energy (Wh)'] = (df['energy (J)'] / 3600).round(6)
-		df['delta energy (Wh)'] = df['energy (Wh)'].diff().fillna(0).round(6)
-
-		self.df = df
-		return df
 
 	def start_time(self):
 		utc_time = datetime.datetime.fromtimestamp(self.timestamp)

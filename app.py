@@ -9,7 +9,7 @@ from db_mongo import DB_Handler
 st.set_page_config(layout = "wide")
 
 authenticator = stauth.Authenticate(
-    credentials = './credentials.yaml'
+    credentials = './.streamlit/credentials.yaml'
 )
 st.session_state["authenticator"] = authenticator
 
@@ -48,11 +48,11 @@ if st.session_state.get('authentication_status'):
             title = 'Home',
             icon = ":material/home:"
         ),
-        st.Page(
-            "./pages/events.py",
-            title = 'Events',
-            icon = ":material/data_thresholding:"
-        ),
+        #st.Page(
+            #"./pages/events.py",
+            #title = 'Events',
+            #icon = ":material/data_thresholding:"
+        #),
         st.Page(
             "./pages/tools.py",
             title = 'Tools',
@@ -67,9 +67,9 @@ if st.session_state.get('authentication_status'):
             "pages/settings.py",
             title = 'Settings',
             icon = ":material/settings_account_box:"
-        )
-    ],
-    position = 'sidebar')
+        )],
+        position = 'top'
+    )
 else:
     pg = st.navigation([st.Page("pages/settings.py")], position = 'sidebar')
 

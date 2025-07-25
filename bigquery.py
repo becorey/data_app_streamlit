@@ -65,7 +65,7 @@ def insert_bigquery(row_to_insert, table = 'events'):
 	return
 
 
-def find(select, where = None, order = None, table = 'events'):
+def find(select, where = None, order = None, table = 'events', limit = None):
 	schema = {
 		'date': 'DATE'
 	}
@@ -74,18 +74,27 @@ def find(select, where = None, order = None, table = 'events'):
 
 	table_id = ".".join([project_id, dataset, table])
 
-	query = ('SELECT ' + select_text + ' FROM `'+table_id+'` ')
+	query = f"SELECT {select_text} FROM `{table_id}` "
 	if where:
 		where_txt = " AND ".join(['`' + str(k) + '` ' + str(c) + ' "' + str(v) + '"' for k, c, v in where])
-		query += 'WHERE ' + where_txt + ' '
+		query += f'WHERE {where_txt} '
 	if order:
 		order_text = ', '.join(['`' + str(v) + '` ' + str(d) for v, d in order])
-		query += 'ORDER BY ' + order_text
+		query += f'ORDER BY {order_text} '
+	if limit:
+		query += f'LIMIT {int(limit)}'
 
 	print('query ', query)
 	query_job = client.query(query)  # API request
 	rows = query_job.result()
 	return rows
+
+
+@st.cache_data
+def df_from_query(q):
+	query_job = client.query(q)  # API request
+	rows = query_job.result()
+	return rows.to_dataframe()
 
 
 def migrate_mongodb_to_bigquery(datalogger_id, limit = 1):

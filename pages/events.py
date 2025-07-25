@@ -29,8 +29,8 @@ if 'selected_tool' in st.session_state and st.session_state['selected_tool'] is 
     )
     events_data = event.events_df_by_id_and_date_range(st.session_state['selected_tool']['datalogger'], start_date, end_date)
 else:
-    events_data = None
-    st.warning('Please select a tool to view events')
+    events_data = event.events_df_recent(200, start_date, end_date)
+    # st.warning('Please select a tool to view events')
 
 st.dataframe(
     events_data,

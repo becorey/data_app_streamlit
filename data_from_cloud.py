@@ -61,12 +61,13 @@ def download_blob(blob, overwrite_existing = False):
 		# print(local_filename + ' already exists')
 		return local_filename
 
-	# print('downloading ' + blob.name + ' to ' + local_filename)
+	print('downloading ' + blob.name + ' to ' + local_filename)
 	os.makedirs(os.path.dirname(local_filename), exist_ok = True) # create dirs if missing
 	try:
+		print(local_filename)
 		blob.download_to_filename(local_filename)
 	except google.api_core.exceptions.NotFound as e:
-		print(time.time(), 'download_blob failed, file not found', e)
+		print(time.time(), 'download_blob failed, file not found', blob.name, e)
 		return False
 
 	return local_filename

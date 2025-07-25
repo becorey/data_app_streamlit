@@ -1,4 +1,6 @@
 credentials.yaml
 secrets.toml
+bucket/*
 
 .idea/*
+*.iws
