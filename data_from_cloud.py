@@ -1,13 +1,14 @@
 import os
 import time
+import streamlit as st
 
 import google.api_core.exceptions
 from google.cloud import storage
 import itertools
 
 
-projectID = 'i-azimuth-215919'
-bucketName = 'bucket-i-azimuth-215919'
+projectID = st.secrets['bigquery_project_id']
+bucketName = st.secrets['google_cloud_storage_bucket_name']
 storage_client = storage.Client(projectID)
 bucket = storage_client.get_bucket(bucketName)
 

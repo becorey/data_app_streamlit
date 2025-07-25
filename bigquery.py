@@ -10,7 +10,7 @@ table = "events"
 dataset = st.secrets['bigquery_dataset']
 project_id = st.secrets['bigquery_project_id']
 table_id = ".".join([project_id, dataset, table])
-client = bigquery.Client()
+client = bigquery.Client(project = project_id)
 
 
 def query(statement):
