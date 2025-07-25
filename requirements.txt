@@ -1,0 +1,15 @@
+streamlit
+streamlit_authenticator
+streamlit-aggrid
+streamlit-keyup
+df-global-search
+pandas
+plotly
+pymongo
+numpy
+memoization
+certifi
+google-api-core
+google-cloud-bigquery
+google-cloud-storage
+google-cloud-bigquery-storage
