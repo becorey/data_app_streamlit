@@ -2,6 +2,7 @@ credentials.yaml
 cred_backup.yaml
 secrets.toml
 bucket/*
+.streamlit/*
 
 .idea/*
 *.iws
