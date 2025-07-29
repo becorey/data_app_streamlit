@@ -165,7 +165,7 @@ st.header(f':material/event_note: Events with {selected_tool['brand']} {selected
 
 events_data = event.events_df_by_id_and_date_range(selected_tool['datalogger'], start_date = selected_date, end_date = selected_date)
 # st.write(events_data)
-# combine adjacent events
+# combine adjacent events into "sessions"
 events_data = event.combine_events(events_data, timeout_s = 60)
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(events_data)

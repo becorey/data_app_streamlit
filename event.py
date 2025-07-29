@@ -93,8 +93,14 @@ def combine_events(df, timeout_s = 60):
 	# https://stackoverflow.com/a/53395439/2666454
 	dfs_by_session = [df.iloc[idx[n] + 1:idx[n + 1] + 1] for n in range(len(idx) - 1)]
 
-	df_return = pd.DataFrame()
+	dfs_by_session_and_charging = list()
 	for dfi in dfs_by_session:
+		dfg = dfi.groupby('charging')
+		for name, data in dfg:
+			dfs_by_session_and_charging.append(data)
+
+	df_return = pd.DataFrame()
+	for dfi in dfs_by_session_and_charging:
 		if dfi.empty:
 			continue
 		duration_sum = dfi['duration'].sum()
