@@ -3,6 +3,7 @@ streamlit_authenticator
 streamlit-aggrid
 streamlit-keyup
 df-global-search
+db-dtypes
 pandas
 plotly
 pymongo
