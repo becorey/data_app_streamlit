@@ -207,17 +207,25 @@ with events_data_cols[1]:
     with st.spinner('Processing data...', show_time = True):
         dfs = list()
         for filename in local_filenames:
-            df = pd.read_csv(filename)
+            try:
+                df = pd.read_csv(filename)
+            except pd.errors.EmptyDataError as e:
+                print(filename, 'error', e)
+                continue
             df = event.harmonize_columns(df)
             timestamp = event.timestamp_from_filename(filename)
             df['t (s)'] = df['t (s)'] + timestamp
+            df['time'] = pd.to_datetime(df['t (s)'], unit = 's')
             dfs.append(df)
+
+        if len(dfs) == 0:
+            st.stop()
 
         df = pd.concat(dfs)
         df = event.fix_energy_values(df)
 
     with st.spinner('Plotting data...', show_time = True):
-        y_vars = st.multiselect(
+        plot_vars = st.multiselect(
             'Plot variables',
             options = df.columns.tolist(),
             default = 'current (A)'
@@ -225,38 +233,50 @@ with events_data_cols[1]:
         resample_rate = st.segmented_control(
             'Resample rate',
             options = ['Original', 0.1, 0.5, 1, 5, 10],
-            default = 0.5,
+            default = 'Original',
             selection_mode = 'single'
         )
-        #if not y_vars:
-            #y_vars = ['current (A)', 'voltage (V)']
+        #if not plot_vars:
+            #plot_vars = ['current (A)', 'voltage (V)']
         x_var = 't (s)'
 
         if resample_rate == 'Original':
             df_resample = df
         else:
-            while True:
-                df_resample = df.copy()
-                df_resample['time'] = pd.to_timedelta(df['t (s)'], unit='s')
-                df_resample = df_resample.resample(f'{float(resample_rate)}s', on = 'time').max()
+            df_resample = df.copy()
+            df_resample['timedelta'] = pd.to_timedelta(df['t (s)'], unit = 's')
+            df_resample = df_resample.resample(f'{float(resample_rate)}s', on = 'timedelta').max()
 
-                # avoid huge plots that freeze the client
-                if df_resample[x_var].size > 1e5:
-                    resample_rate += 1
-                    continue
-                break
+        # avoid huge plots that freeze the client
+        resample_rate_override = resample_rate
+        while df_resample[x_var].size * len(plot_vars) > 2e5:
+            if not isinstance(resample_rate_override, float):
+                resample_rate_override = 0.0
+            resample_rate_override = float(resample_rate_override) + 0.1
+            df_resample = df.copy()
+            df_resample['timedelta'] = pd.to_timedelta(df['t (s)'], unit='s')
+            df_resample = df_resample.resample(f'{float(resample_rate_override)}s', on = 'timedelta').max()
 
-        st.write(f'Original {df[x_var].size} datapoints')
-        st.write(f'Resampled {df_resample[x_var].size} datapoints')
+        if resample_rate_override != resample_rate:
+            st.write(f'Resample rate increased to {resample_rate_override}s to maintain plotting speed')
+
+        line_plot = px.line(
+            df_resample,
+            x = 'time',
+            y = plot_vars,
+        )
+        line_plot.update_xaxes(tickformat = '%I:%M:%S %p')
         st.plotly_chart(
-            px.line(
-                df_resample,
-                x = x_var,
-                y = y_vars,
-            )
+            line_plot
         )
 
-        for y_var in y_vars:
+        hist_vars = st.multiselect(
+            'Histogram variables',
+            options = df.columns.tolist(),
+            default = 'current (A)'
+        )
+
+        for y_var in hist_vars:
             bin_width = 10
             nbins = math.ceil((df[y_var].max() - df[y_var].min()) / bin_width)
             hist = px.histogram(
