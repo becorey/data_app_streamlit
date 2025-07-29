@@ -4,12 +4,20 @@ import streamlit as st
 
 import google.api_core.exceptions
 from google.cloud import storage
+from google.oauth2 import service_account
 import itertools
 
 
 projectID = st.secrets['bigquery_project_id']
 bucketName = st.secrets['google_cloud_storage_bucket_name']
-storage_client = storage.Client(projectID)
+gcp_credentials = service_account.Credentials.from_service_account_info(
+	st.secrets["gcp_service_account"]
+)
+
+storage_client = storage.Client(
+	projectID,
+	credentials = gcp_credentials
+)
 bucket = storage_client.get_bucket(bucketName)
 
 def list_cloud_files(prefix = ''):
@@ -124,8 +132,8 @@ def upload_google_cloud_storage(source_file_name, destination_blob_name = ''):
 	# The ID of your GCS object
 	# destination_blob_name = "storage-object-name"
 	global bucketName
-	storage_client = storage.Client()
-	bucket = storage_client.bucket(bucketName)
+	global storage_client
+	global bucket
 	if destination_blob_name == '':
 		destination_blob_name = source_file_name
 

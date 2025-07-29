@@ -1,4 +1,5 @@
 from google.cloud import bigquery
+from google.oauth2 import service_account
 import time
 import copy
 from memoization import cached
@@ -10,7 +11,14 @@ table = "events"
 dataset = st.secrets['bigquery_dataset']
 project_id = st.secrets['bigquery_project_id']
 table_id = ".".join([project_id, dataset, table])
-client = bigquery.Client(project = project_id)
+gcp_credentials = service_account.Credentials.from_service_account_info(
+	st.secrets["gcp_service_account"]
+)
+
+client = bigquery.Client(
+	project = project_id,
+	credentials = gcp_credentials
+)
 
 
 def query(statement):

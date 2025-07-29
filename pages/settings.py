@@ -9,6 +9,8 @@ if 'authenticator' not in st.session_state:
 
 authenticator = st.session_state["authenticator"]
 
+st.write('authentication_status', st.session_state.get('authentication_status'))
+
 if st.session_state.get('authentication_status'):
     st.title("Settings")
     st.write(f'Welcome *{st.session_state.get("name")}*')
