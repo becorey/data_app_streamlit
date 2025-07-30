@@ -6,6 +6,7 @@ import ast
 import plotly.express as px
 import math
 
+
 import bigquery
 import event
 import functions
@@ -164,17 +165,26 @@ selected_date = datetime.datetime.strptime(selected_date, "%Y-%m-%dT%H:%M:%S.%f"
 st.header(f':material/event_note: Events with {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']} on {selected_date}', divider = True)
 
 events_data = event.events_df_by_id_and_date_range(selected_tool['datalogger'], start_date = selected_date, end_date = selected_date)
-# st.write(events_data)
+
 # combine adjacent events into "sessions"
-events_data = event.combine_events(events_data, timeout_s = 60)
+dfs_by_session = event.combine_adjacent_events(events_data, timeout_s = 60)
+dfs_by_session_and_charging = event.split_events_by_charging(dfs_by_session)
+if not selected_tool['timezone'] or not isinstance(selected_tool['timezone'], str):
+    selected_tool['timezone'] = 'UTC'
+events_data = event.events_list_summarized(dfs_by_session_and_charging, selected_tool['timezone'])
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(events_data)
-gob.configure_selection('single', use_checkbox = False)
-gob.configure_column(
-    'Time (UTC)',
-    headerCheckboxSelection = True, checkboxSelection = False,
-    # type = ["customDateTimeFormat"], custom_format_string='yyyy-MM-dd'
+gob.configure_selection(
+    'multiple',
+    use_checkbox = True,
+    header_checkbox = True,
+    suppressRowClickSelection = False
 )
+#gob.configure_column(
+    # 'Time (UTC)',
+    # headerCheckboxSelection = True, checkboxSelection = False,
+    # type = ["customDateTimeFormat"], custom_format_string='yyyy-MM-dd'
+#)
 columns_to_hide = ['date', 'filenames']
 for col in columns_to_hide:
     gob.configure_column(col, hide = True)
@@ -193,36 +203,35 @@ with events_data_cols[0]:
 if events_data_selection.selected_data is None:
     st.stop()
 
+st.write(events_data_selection.selected_data)
 selected_event = events_data_selection.selected_data.iloc[0]
 # st.write(selected_event)
 
-filenames = ast.literal_eval(events_data_selection.selected_data['filenames'].iloc[0])
-local_filenames = [data_from_cloud.server_to_local_filename(f) for f in filenames]
-
 with events_data_cols[1]:
     with st.spinner('Downloading files...', show_time = True):
-        for server_filename in filenames:
-            local_filename = data_from_cloud.download_blob_by_name(server_filename)
-
-    with st.spinner('Processing data...', show_time = True):
         dfs = list()
-        for filename in local_filenames:
-            try:
-                df = pd.read_csv(filename)
-            except pd.errors.EmptyDataError as e:
-                print(filename, 'error', e)
-                continue
-            df = event.harmonize_columns(df)
-            timestamp = event.timestamp_from_filename(filename)
-            df['t (s)'] = df['t (s)'] + timestamp
-            df['time'] = pd.to_datetime(df['t (s)'], unit = 's')
-            dfs.append(df)
+        for index, ev in events_data_selection.selected_data.iterrows():
+            ev['filenames'] = ast.literal_eval(ev['filenames'])
+            for server_filename in ev['filenames']:
+                local_filename = data_from_cloud.download_blob_by_name(server_filename)
+
+                try:
+                    df = pd.read_csv(local_filename)
+                except pd.errors.EmptyDataError as e:
+                    print(local_filename, 'error', e)
+                    continue
+                df = event.harmonize_columns(df)
+                timestamp = event.timestamp_from_filename(local_filename)
+                df['t (s)'] = df['t (s)'] + timestamp
+                df['time'] = pd.to_datetime(df['t (s)'], unit = 's', utc = True)
+                df = event.fix_energy_values(df)
+                df = functions.remove_outliers(df, ['current (A)'], 6) # remove extreme outliers
+                dfs.append(df)
 
         if len(dfs) == 0:
             st.stop()
 
         df = pd.concat(dfs)
-        df = event.fix_energy_values(df)
 
     with st.spinner('Plotting data...', show_time = True):
         plot_vars = st.multiselect(
@@ -292,7 +301,7 @@ with events_data_cols[0]:
     st.download_button(
         label = "Download CSV",
         data = df.to_csv(index = False).encode('utf-8'),
-        file_name = f"{selected_event['Time (UTC)']} {selected_tool['datalogger']} {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']}",
+        file_name = f"{selected_event['Time (local)']} {selected_tool['datalogger']} {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']}",
         mime = "text/csv",
         key = 'download-csv'
     )

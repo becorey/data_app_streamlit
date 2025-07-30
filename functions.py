@@ -1,6 +1,8 @@
 import os
 import datetime
 from zoneinfo import ZoneInfo
+from scipy import stats
+import numpy as np
 
 def split_path(path):
     """
@@ -29,3 +31,7 @@ def timestamp_to_str(timestamp, timezone):
         return 'date_error'
     local_time = utc_time.astimezone(ZoneInfo(timezone))
     return local_time.strftime('%Y-%m-%d %I:%M:%S %p')
+
+
+def remove_outliers(df, cols, zscore_threshold = 3):
+    return df[(np.abs(stats.zscore(df[cols])) < zscore_threshold).all(axis=1)]

@@ -83,13 +83,4 @@ if st.session_state.get('authentication_status'):
 else:
     pg = st.navigation([st.Page("pages/settings.py")], position = 'top')
 
-if 'selected_tool' in st.session_state and st.session_state['selected_tool'] is not None:
-    with st.sidebar:
-        st.write(st.session_state['selected_tool']['datalogger'])
-        st.write(st.session_state['selected_tool']['brand'])
-        st.write(st.session_state['selected_tool']['model'])
-        st.write(st.session_state['selected_tool']['SN'])
-        st.write(st.session_state['selected_tool']['description'])
-
-
 pg.run()

@@ -74,16 +74,14 @@ def events_df_recent(limit = 100, start_date = None, end_date = None, select = N
 	return rows.to_dataframe()
 
 
-def combine_events(df, timeout_s = 60):
-	"""
-	:param df: from events_df_by_id_and_date_range
-	:return:
-	"""
+def combine_adjacent_events(df, timeout_s = 60):
+	""" input a dataframe of events
+	returns a list of dataframes,
+	events grouped together that are adjacent in time by less than the timeout_s """
 	df['end_timestamp'] = df['timestamp'] + df['duration']
 	df['time_to_next'] = df['timestamp'].shift(-1) - df['end_timestamp']
+	df['time_to_next'] = pd.to_numeric(df['time_to_next'])
 	df['time_to_next'] = df['time_to_next'].fillna(60 * 60 * 24)
-
-	df['charging'] = (df['avgCurrent'] < 0)
 
 	# find indexes to split sessions
 	# based on exceeding the session_timeout
@@ -93,32 +91,54 @@ def combine_events(df, timeout_s = 60):
 	# https://stackoverflow.com/a/53395439/2666454
 	dfs_by_session = [df.iloc[idx[n] + 1:idx[n + 1] + 1] for n in range(len(idx) - 1)]
 
-	dfs_by_session_and_charging = list()
-	for dfi in dfs_by_session:
+	return dfs_by_session
+
+
+def split_events_by_charging(dfs):
+	dfs_r = list()
+	for dfi in dfs:
+		dfi['charging'] = (dfi['avgCurrent'] < 0)
 		dfg = dfi.groupby('charging')
 		for name, data in dfg:
-			dfs_by_session_and_charging.append(data)
+			dfs_r.append(data)
+	return dfs_r
 
-	df_return = pd.DataFrame()
-	for dfi in dfs_by_session_and_charging:
+
+def events_list_summarized(dfs, timezone):
+	""" input list of dataframes, each dataframe a list of events
+	returns one dataframe, with a row for each item from the list summarized """
+	df = pd.DataFrame()
+	for dfi in dfs:
 		if dfi.empty:
 			continue
 		duration_sum = dfi['duration'].sum()
-		start_timestamp = dfi['timestamp'].iloc[0]
+		start_timestamp = dfi['timestamp'].min()
 		row = pd.DataFrame([{
-			'Time (UTC)': functions.timestamp_to_str(start_timestamp, 'UTC'),
-			#'timestamp': dfi['timestamp'].iloc[0],
+			'Time (local)': functions.timestamp_to_str(start_timestamp, timezone),
+			'Timezone': timezone,
+			'timestamp': start_timestamp,
 			'Duration': functions.seconds_to_string(duration_sum),
 			'Duration (s)': duration_sum,
 			'Energy (Wh)': dfi['energy'].sum(),
 			'date': dfi['date'].iloc[0],
 			'filenames': dfi['filename'].tolist()
 		}])
-		df_return = pd.concat([df_return, row], ignore_index = True)
+		df = pd.concat([df, row], ignore_index = True)
 
-	df_return['Duration (s)'] = df_return['Duration (s)'].astype('float64')
-	df_return['Energy (Wh)'] = df_return['Energy (Wh)'].astype('float64')
-	return df_return
+	df['Duration (s)'] = df['Duration (s)'].astype('float64')
+	df['Energy (Wh)'] = df['Energy (Wh)'].astype('float64')
+
+	return df
+
+def combine_events(df, timeout_s = 60):
+	"""
+	:param df: from events_df_by_id_and_date_range
+	:return:
+	"""
+	dfs_by_session = combine_adjacent_events(df, timeout_s)
+	dfs_by_session_and_charging = split_events_by_charging(dfs_by_session)
+	df_r = events_list_summarized(dfs_by_session_and_charging)
+	return df_r
 
 def event_by_filename(cloud_filename, timezone):
 	rows = bigquery.find(

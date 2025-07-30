@@ -5,11 +5,13 @@ streamlit-keyup
 df-global-search
 db-dtypes
 pandas
+scipy
 plotly
 pymongo
 numpy
 memoization
 certifi
+pytz
 google-api-core
 google-cloud-bigquery
 google-cloud-storage
