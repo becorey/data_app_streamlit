@@ -13,8 +13,8 @@ import bigquery
 
 
 def rebase_time_mp_to_unix(mp_timestamp):
-	# the timestamp from micropython corresponds to 0 at Jan-1-2000
-	mp_timebase = int(datetime.datetime.timestamp(datetime.datetime.strptime("01/01/2000", "%d/%m/%Y")))
+	# the timestamp from micropython corresponds to 0 at Jan-1-2000 12:00:00 AM
+	mp_timebase = 946684800
 	mp_timestamp = int(mp_timestamp)
 	unix_timestamp = mp_timestamp + mp_timebase
 	return unix_timestamp
