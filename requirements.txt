@@ -2,7 +2,6 @@ streamlit
 streamlit_authenticator
 streamlit-aggrid
 streamlit-keyup
-df-global-search
 db-dtypes
 pandas
 scipy
@@ -19,3 +18,4 @@ google-cloud-bigquery-storage
 google-api-python-client
 google-auth
 google-auth-oauthlib
+requests
