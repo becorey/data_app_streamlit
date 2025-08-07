@@ -130,7 +130,9 @@ class DB_Handler():
 		return
 
 	def df(self, cursor):
-		return pd.DataFrame(list(cursor))
+		dfi = pd.DataFrame(list(cursor))
+		dfi['_id'] = dfi['_id'].astype(str)
+		return dfi
 
 if __name__ == '__main__':
 	# Create a new client and connect to the server
