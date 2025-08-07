@@ -78,6 +78,8 @@ def combine_adjacent_events(df, timeout_s = 60):
 	""" input a dataframe of events
 	returns a list of dataframes,
 	events grouped together that are adjacent in time by less than the timeout_s """
+	if len(df.index) <= 1:
+		return [df]
 	df['end_timestamp'] = df['timestamp'] + df['duration']
 	df['time_to_next'] = df['timestamp'].shift(-1) - df['end_timestamp']
 	df['time_to_next'] = pd.to_numeric(df['time_to_next'])
