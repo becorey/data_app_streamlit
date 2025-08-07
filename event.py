@@ -116,7 +116,7 @@ def events_list_summarized(dfs, timezone):
 		duration_sum = dfi['duration'].sum()
 		start_timestamp = dfi['timestamp'].min()
 		row = pd.DataFrame([{
-			'Time (local)': functions.timestamp_to_str(start_timestamp, timezone),
+			'Time (local)': functions.timestamp_to_local_time(start_timestamp, timezone),
 			'Timezone': timezone,
 			'timestamp': start_timestamp,
 			'Duration': functions.seconds_to_string(duration_sum),

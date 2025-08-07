@@ -24,13 +24,13 @@ def seconds_to_string(seconds):
     return str(int(hours)) + 'h ' + str(int(minutes)) + 'm ' + str(int(seconds)) + 's'
 
 
-def timestamp_to_str(timestamp, timezone):
+def timestamp_to_local_time(timestamp, timezone):
     try:
-        utc_time = datetime.datetime.fromtimestamp(timestamp)
+        utc_time = datetime.datetime.fromtimestamp(timestamp, tz = ZoneInfo('UTC'))
     except IndexError:
         return 'date_error'
     local_time = utc_time.astimezone(ZoneInfo(timezone))
-    return local_time.strftime('%Y-%m-%d %I:%M:%S %p')
+    return local_time # .strftime('%Y-%m-%d %I:%M:%S %p')
 
 
 def remove_outliers(df, cols, zscore_threshold = 3):
