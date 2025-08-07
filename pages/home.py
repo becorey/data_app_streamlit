@@ -39,11 +39,13 @@ st.header(f':material/earthquake: Active Tools {start_date} to {end_date}', divi
 query = (f"SELECT "
          f"`datalogger`, "
          f"SUM(duration) as sum_duration, "
+         f"ROUND(SUM(CASE WHEN avgCurrent >=0 THEN energy ELSE 0 END), 0) AS `Discharged Wh`, "
+         f"ROUND(SUM(CASE WHEN avgCurrent <0 THEN energy ELSE 0 END), 0) AS `Charged Wh`, "
          f"MAX(date) as `Last Active` "
          f"FROM `{st.secrets['bigquery_project_id']}.{st.secrets['bigquery_dataset']}.events` "
          f"WHERE `date` >= \"{start_date}\" AND `date` <= \"{end_date}\" "
          f"GROUP BY `datalogger` "
-         f"ORDER BY `sum_duration` DESC "
+         f"ORDER BY `Last Active` DESC "
          )
 active_tools = bigquery.df_from_query(query)
 active_tools['Total Time'] = active_tools.apply(lambda row: functions.seconds_to_string(row['sum_duration']), axis = 1)
@@ -67,13 +69,17 @@ gob.configure_default_column(
     enableCellTextSelection = True,
 )
 gob.configure_selection('single', use_checkbox = False)
-gob.configure_column('datalogger', headerCheckboxSelection = True, checkboxSelection = False)
+gob.configure_column(
+    'datalogger',
+    headerCheckboxSelection = True, checkboxSelection = False
+)
 gob.configure_column("Last Active", type=["customDateTimeFormat"], custom_format_string='yyyy-MM-dd')
 columns_to_hide = [
     'sum_duration', '_id', 'history',
     'gps', 'gnss',
     'shape_height_in', 'shape_width_in',
-    'Tool Name', 'schedule'
+    'Tool Name', 'schedule',
+    'timezone', 'hotspot'
 ]
 for c in columns_to_hide:
     gob.configure_column(c, hide = True)
@@ -93,19 +99,22 @@ col_types = {
 for k, v in col_types.items():
     active_tools[k] = active_tools[k].astype(v)
 
+active_tools = active_tools.replace({None: '', 'nan': ''})
+
 active_tools_cols = st.columns([0.6, 0.4])
 with active_tools_cols[0]:
     active_tools_selection = st_aggrid.AgGrid(
         active_tools,
         gridOptions = gob.build(),
         update_on = ('modelUpdated', 500),
-        key = 'active_tools'
+        key = 'active_tools',
+        fit_columns_on_grid_load = True
     )
 
 with active_tools_cols[1]:
     st.plotly_chart(
         px.bar(
-            active_tools,
+            active_tools.sort_values(by = 'sum_duration', ascending = True),
             x = 'Tool Name',
             y = 'sum_duration'
         )
@@ -123,21 +132,19 @@ st.header(f":material/calendar_month: Usage by Day: {selected_tool['brand']} {se
 query = (f"SELECT "
          f"date, "
          f"SUM(duration) as sum_duration, "
-         f"SUM(energy) as net_energy, "
          f"SUM(CASE WHEN avgCurrent >=0 THEN energy ELSE 0 END) AS `Energy Wh Discharged`, "
          f"SUM(CASE WHEN avgCurrent <0 THEN energy ELSE 0 END) AS `Energy Wh Charged`, "
          f"FROM `{st.secrets['bigquery_project_id']}.{st.secrets['bigquery_dataset']}.events` "
          f"WHERE `datalogger` = \"{selected_tool['datalogger']}\" AND `date` >= \"{start_date}\" AND `date` <= \"{end_date}\" "
          f"GROUP BY `date` "
-         f"ORDER BY `date` DESC "
+         f"ORDER BY `date` ASC "
          )
 data_by_date = bigquery.df_from_query(query)
 data_by_date['Total Time'] = data_by_date.apply(lambda row: functions.seconds_to_string(row['sum_duration']), axis = 1)
+data_by_date['date'] = pd.to_datetime(data_by_date['date'])
 
-# data_by_date['date'] = pd.to_datetime(data_by_date['date'])
 col_types = {
     'sum_duration': 'float64',
-    'net_energy': 'float64',
     'Energy Wh Discharged': 'float64',
     'Energy Wh Charged': 'float64',
     'Total Time': 'str'
@@ -147,7 +154,6 @@ for k, v in col_types.items():
 
 data_by_date['Energy Wh Discharged'] = data_by_date['Energy Wh Discharged'].round(2)
 data_by_date['Energy Wh Charged'] = data_by_date['Energy Wh Charged'].round(2)
-data_by_date['net_energy'] = data_by_date['net_energy'].round(2)
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(data_by_date)
 gob.configure_default_column(
@@ -163,7 +169,6 @@ gob.configure_column(
 )
 gob.configure_column('sum_duration', hide = True)
 
-
 usage_by_day_cols = st.columns([0.6, 0.4])
 
 with usage_by_day_cols[0]:
@@ -176,12 +181,16 @@ with usage_by_day_cols[0]:
 
 with usage_by_day_cols[1]:
     usage_by_day_bar = px.bar(
-        data_by_date,
+        data_by_date.sort_values(by = 'date', ascending = True),
         x = 'date',
         y = ['Energy Wh Discharged', 'Energy Wh Charged'],
         barmode = 'group'
     )
-    usage_by_day_bar.update_xaxes(type = 'category')
+    # usage_by_day_bar.update_xaxes(type = 'category')
+    usage_by_day_bar.update_xaxes(
+        dtick = "D1",  # Set tick interval to 1 day
+        tickformat = "%Y-%m-%d"  # Format tick labels as YYYY-MM-DD
+    )
     st.plotly_chart(
         usage_by_day_bar
     )
@@ -190,7 +199,7 @@ if data_by_date_selection.selected_data is None:
     st.stop()
 
 selected_date = data_by_date_selection.selected_data.iloc[0]['date'] # literal "2025-03-13T00:00:00.000"
-selected_date = datetime.datetime.strptime(selected_date, "%Y-%m-%dT%H:%M:%S.%f").date()
+selected_date = datetime.datetime.strptime(selected_date, "%Y-%m-%dT%H:%M:%S").date()
 
 
 # -----
@@ -239,13 +248,24 @@ with events_data_cols[0]:
     )
 
 with events_data_cols[1]:
-    events_data_plot_df = events_data[events_data['Duration (s)'] > 120]
-    events_data_plot = plotly.graph_objs.Figure(
-        plotly.graph_objs.Bar(
-            x = events_data_plot_df['Time (local)'],
-            y = events_data_plot_df['Energy (Wh)']
-        )
+    events_data_plot_df = events_data #[events_data['Duration (s)'] > 120]
+    events_data_plot_df['bar_width'] = events_data_plot_df['Duration (s)'].astype(float) * 1000
+    events_data_plot = px.bar(
+        events_data_plot_df,
+        x = 'Time (local)',
+        y = 'Energy (Wh)'
     )
+
+    #events_data_plot.update_xaxes(
+        #dtick = "H1",
+        #tickformat = "%H:%M:%S"
+    #)
+    events_data_plot.update_traces(width = events_data_plot_df['bar_width'])
+    events_data_plot.update_xaxes(
+        #type = 'category',
+        tickformat = "%I:%M:%S %p"
+    )
+
     st.plotly_chart(events_data_plot)
 
 
