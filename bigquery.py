@@ -98,7 +98,7 @@ def find(select, where = None, order = None, table = 'events', limit = None):
 	return rows
 
 
-@st.cache_data
+@st.cache_data(ttl = 5*60, show_spinner = True, show_time = True)
 def df_from_query(q):
 	query_job = client.query(q)  # API request
 	rows = query_job.result()

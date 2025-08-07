@@ -30,7 +30,7 @@ def timestamp_from_filename(filename):
 	return timestamp
 
 
-@st.cache_data
+@st.cache_data(ttl = 5*60, show_spinner = True, show_time = True)
 def events_df_by_id_and_date_range(
 		datalogger_id,
 		start_date, end_date, timezone = 'US/Central',
