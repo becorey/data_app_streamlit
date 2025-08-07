@@ -1,3 +1,4 @@
+import plotly.figure_factory
 import streamlit as st
 import datetime
 import st_aggrid
@@ -5,7 +6,6 @@ import pandas as pd
 import ast
 import plotly.express as px
 import math
-
 
 import bigquery
 import event
@@ -50,25 +50,48 @@ active_tools['Total Time'] = active_tools.apply(lambda row: functions.seconds_to
 
 # add info from tools in mongodb
 tools_data = db.df(db.tools.find())
-# tools_data['_id'] = tools_data['_id'].astype(str)
 tools_data = tools_data.drop(columns = ['_id', 'history',])
 active_tools = pd.merge(active_tools, tools_data, on = 'datalogger', how = 'left')
 active_tools['Tool Name'] = active_tools['model'] + ' ' + active_tools['SN']
 
 # add info from users in mongodb
 users_data = db.df(db.users.find())
-users_data['_id'] = users_data['_id'].astype(str)
 users_data = users_data[['_id', 'name']]
 active_tools = pd.merge(active_tools, users_data, left_on = 'user', right_on = '_id', how = 'left')
 active_tools = active_tools.drop(columns = ['user'])
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(active_tools)
+gob.configure_default_column(
+    filter = True,
+    groupable = True,
+    enableCellTextSelection = True,
+)
 gob.configure_selection('single', use_checkbox = False)
 gob.configure_column('datalogger', headerCheckboxSelection = True, checkboxSelection = False)
 gob.configure_column("Last Active", type=["customDateTimeFormat"], custom_format_string='yyyy-MM-dd')
-columns_to_hide = ['sum_duration', '_id', 'history', 'gps', 'gnss', 'shape_height_in', 'shape_width_in', 'Tool Name']
+columns_to_hide = [
+    'sum_duration', '_id', 'history',
+    'gps', 'gnss',
+    'shape_height_in', 'shape_width_in',
+    'Tool Name', 'schedule'
+]
 for c in columns_to_hide:
     gob.configure_column(c, hide = True)
+
+col_types = {
+    'datalogger': 'str',
+    'Last Active': 'str',
+    'Total Time': 'str',
+    'brand': 'str',
+    'model': 'str',
+    'description': 'str',
+    'SN': 'str',
+    'timezone': 'str',
+    'hotspot': 'str',
+    'name': 'str'
+}
+for k, v in col_types.items():
+    active_tools[k] = active_tools[k].astype(v)
 
 active_tools_cols = st.columns([0.6, 0.4])
 with active_tools_cols[0]:
@@ -100,9 +123,9 @@ st.header(f":material/calendar_month: Usage by Day: {selected_tool['brand']} {se
 query = (f"SELECT "
          f"date, "
          f"SUM(duration) as sum_duration, "
-         f"SUM(energy) as sum_energy, "
-         f"SUM(CASE WHEN avgCurrent >=0 THEN energy ELSE 0 END) AS energy_positive, "
-         f"SUM(CASE WHEN avgCurrent <0 THEN energy ELSE 0 END) AS energy_negative, "
+         f"SUM(energy) as net_energy, "
+         f"SUM(CASE WHEN avgCurrent >=0 THEN energy ELSE 0 END) AS `Energy Wh Discharged`, "
+         f"SUM(CASE WHEN avgCurrent <0 THEN energy ELSE 0 END) AS `Energy Wh Charged`, "
          f"FROM `{st.secrets['bigquery_project_id']}.{st.secrets['bigquery_dataset']}.events` "
          f"WHERE `datalogger` = \"{selected_tool['datalogger']}\" AND `date` >= \"{start_date}\" AND `date` <= \"{end_date}\" "
          f"GROUP BY `date` "
@@ -114,21 +137,29 @@ data_by_date['Total Time'] = data_by_date.apply(lambda row: functions.seconds_to
 # data_by_date['date'] = pd.to_datetime(data_by_date['date'])
 col_types = {
     'sum_duration': 'float64',
-    'sum_energy': 'float64',
-    'energy_positive': 'float64',
-    'energy_negative': 'float64',
+    'net_energy': 'float64',
+    'Energy Wh Discharged': 'float64',
+    'Energy Wh Charged': 'float64',
     'Total Time': 'str'
 }
 for k, v in col_types.items():
     data_by_date[k] = data_by_date[k].astype(v)
 
+data_by_date['Energy Wh Discharged'] = data_by_date['Energy Wh Discharged'].round(2)
+data_by_date['Energy Wh Charged'] = data_by_date['Energy Wh Charged'].round(2)
+data_by_date['net_energy'] = data_by_date['net_energy'].round(2)
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(data_by_date)
+gob.configure_default_column(
+    filter = True,
+    groupable = True,
+    enableCellTextSelection = True,
+)
 gob.configure_selection('single', use_checkbox = False)
 gob.configure_column(
     'date',
     headerCheckboxSelection = True, checkboxSelection = False,
-    type = ["customDateTimeFormat"], custom_format_string='yyyy-MM-dd'
+    type = ["customDateTimeFormat"], custom_format_string='MM-dd-yyyy'
 )
 gob.configure_column('sum_duration', hide = True)
 
@@ -147,7 +178,8 @@ with usage_by_day_cols[1]:
     usage_by_day_bar = px.bar(
         data_by_date,
         x = 'date',
-        y = 'sum_duration'
+        y = ['Energy Wh Discharged', 'Energy Wh Charged'],
+        barmode = 'group'
     )
     usage_by_day_bar.update_xaxes(type = 'category')
     st.plotly_chart(
@@ -167,9 +199,16 @@ st.header(f':material/event_note: Events with {selected_tool['brand']} {selected
 events_data = event.events_df_by_id_and_date_range(selected_tool['datalogger'], start_date = selected_date, end_date = selected_date)
 
 # combine adjacent events into "sessions"
-dfs_by_session = event.combine_adjacent_events(events_data, timeout_s = 60)
+dfs_by_session = event.combine_adjacent_events(events_data, timeout_s = 120)
+if len(dfs_by_session) == 1 and dfs_by_session[0].empty:
+    st.warning('Empty dataframe')
+    st.write('events_data')
+    st.write(events_data)
+    st.write('dfs_by_session')
+    st.write(dfs_by_session)
+    st.stop()
 dfs_by_session_and_charging = event.split_events_by_charging(dfs_by_session)
-if not selected_tool['timezone'] or not isinstance(selected_tool['timezone'], str):
+if not selected_tool['timezone'] or not isinstance(selected_tool['timezone'], str) or selected_tool['timezone'] == 'nan':
     selected_tool['timezone'] = 'UTC'
 events_data = event.events_list_summarized(dfs_by_session_and_charging, selected_tool['timezone'])
 
@@ -180,12 +219,12 @@ gob.configure_selection(
     header_checkbox = True,
     suppressRowClickSelection = False
 )
-#gob.configure_column(
-    # 'Time (UTC)',
+gob.configure_column(
+    'Time (local)',
     # headerCheckboxSelection = True, checkboxSelection = False,
-    # type = ["customDateTimeFormat"], custom_format_string='yyyy-MM-dd'
-#)
-columns_to_hide = ['date', 'filenames']
+    type = ["customDateTimeFormat"], custom_format_string='yyyy-MM-dd hh:mm:ss a (z)'
+)
+columns_to_hide = ['date', 'filenames', 'Duration (s)'] #  'timestamp',
 for col in columns_to_hide:
     gob.configure_column(col, hide = True)
 
@@ -199,15 +238,26 @@ with events_data_cols[0]:
         key = 'events_data'
     )
 
+with events_data_cols[1]:
+    events_data_plot_df = events_data[events_data['Duration (s)'] > 120]
+    events_data_plot = plotly.graph_objs.Figure(
+        plotly.graph_objs.Bar(
+            x = events_data_plot_df['Time (local)'],
+            y = events_data_plot_df['Energy (Wh)']
+        )
+    )
+    st.plotly_chart(events_data_plot)
+
 
 if events_data_selection.selected_data is None:
     st.stop()
 
-st.write(events_data_selection.selected_data)
-selected_event = events_data_selection.selected_data.iloc[0]
-# st.write(selected_event)
+events_plot_cols = st.columns([.5, .5])
 
-with events_data_cols[1]:
+with events_plot_cols[0]:
+    st.subheader('Plotting selected events')
+    # st.write(events_data_selection.selected_data[['Time (local)', 'Duration', 'Energy (Wh)']])
+
     with st.spinner('Downloading files...', show_time = True):
         dfs = list()
         for index, ev in events_data_selection.selected_data.iterrows():
@@ -224,6 +274,7 @@ with events_data_cols[1]:
                 timestamp = event.timestamp_from_filename(local_filename)
                 df['t (s)'] = df['t (s)'] + timestamp
                 df['time'] = pd.to_datetime(df['t (s)'], unit = 's', utc = True)
+                df['time'] = df['time'].dt.tz_convert(selected_tool['timezone'])
                 df = event.fix_energy_values(df)
                 df = functions.remove_outliers(df, ['current (A)'], 6) # remove extreme outliers
                 dfs.append(df)
@@ -232,23 +283,37 @@ with events_data_cols[1]:
             st.stop()
 
         df = pd.concat(dfs)
+        df = event.fix_energy_values(df)
 
+
+    plot_vars = st.multiselect(
+        'Plot variables',
+        options = df.columns.tolist(),
+        default = 'current (A)'
+    )
+    plot_color_cols = st.columns(2)
+    with plot_color_cols[0]:
+        plot_color = st.selectbox(
+            'Color by variable',
+            options = [None] + df.columns.tolist(),
+        )
+    with plot_color_cols[1]:
+        color_scale = st.selectbox(
+            'Color scale',
+            options = px.colors.named_colorscales(),
+            index = px.colors.named_colorscales().index('temps')
+        )
+    resample_rate = st.segmented_control(
+        'Resample rate',
+        options = ['Original', 0.1, 0.5, 1, 5, 10],
+        default = 'Original',
+        selection_mode = 'single'
+    )
+
+    x_var = 't (s)'
+
+with events_plot_cols[1]:
     with st.spinner('Plotting data...', show_time = True):
-        plot_vars = st.multiselect(
-            'Plot variables',
-            options = df.columns.tolist(),
-            default = 'current (A)'
-        )
-        resample_rate = st.segmented_control(
-            'Resample rate',
-            options = ['Original', 0.1, 0.5, 1, 5, 10],
-            default = 'Original',
-            selection_mode = 'single'
-        )
-        #if not plot_vars:
-            #plot_vars = ['current (A)', 'voltage (V)']
-        x_var = 't (s)'
-
         if resample_rate == 'Original':
             df_resample = df
         else:
@@ -257,11 +322,13 @@ with events_data_cols[1]:
             df_resample = df_resample.resample(f'{float(resample_rate)}s', on = 'timedelta').max()
 
         # avoid huge plots that freeze the client
+        max_num_points = 1.5e5
+        resample_rate_increment = 0.1
         resample_rate_override = resample_rate
-        while df_resample[x_var].size * len(plot_vars) > 2e5:
+        while df_resample[x_var].size * len(plot_vars) > max_num_points:
             if not isinstance(resample_rate_override, float):
                 resample_rate_override = 0.0
-            resample_rate_override = float(resample_rate_override) + 0.1
+            resample_rate_override = round(float(resample_rate_override) + resample_rate_increment, 2)
             df_resample = df.copy()
             df_resample['timedelta'] = pd.to_timedelta(df['t (s)'], unit='s')
             df_resample = df_resample.resample(f'{float(resample_rate_override)}s', on = 'timedelta').max()
@@ -269,10 +336,12 @@ with events_data_cols[1]:
         if resample_rate_override != resample_rate:
             st.write(f'Resample rate increased to {resample_rate_override}s to maintain plotting speed')
 
-        line_plot = px.line(
+        line_plot = px.scatter(
             df_resample,
             x = 'time',
             y = plot_vars,
+            color = plot_color,
+            color_continuous_scale = color_scale
         )
         line_plot.update_xaxes(tickformat = '%I:%M:%S %p')
         st.plotly_chart(
@@ -286,7 +355,7 @@ with events_data_cols[1]:
         )
 
         for y_var in hist_vars:
-            bin_width = 10
+            bin_width = 5
             nbins = math.ceil((df[y_var].max() - df[y_var].min()) / bin_width)
             hist = px.histogram(
                 df,
@@ -297,11 +366,14 @@ with events_data_cols[1]:
             )
             st.plotly_chart(hist, key = f'hist-{y_var}')
 
-with events_data_cols[0]:
+with events_plot_cols[0]:
+    st.subheader('Download CSV of selected events')
+    selected_event = events_data_selection.selected_data.iloc[0]
+
     st.download_button(
         label = "Download CSV",
         data = df.to_csv(index = False).encode('utf-8'),
-        file_name = f"{selected_event['Time (local)']} {selected_tool['datalogger']} {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']}",
+        file_name = f"{selected_event['Time (local)']} {selected_tool['datalogger']} {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']}.csv",
         mime = "text/csv",
         key = 'download-csv'
     )
