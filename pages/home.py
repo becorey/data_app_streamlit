@@ -6,6 +6,7 @@ import pandas as pd
 import ast
 import plotly.express as px
 import math
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 import bigquery
 import event
@@ -94,7 +95,11 @@ col_types = {
     'SN': 'str',
     'timezone': 'str',
     'hotspot': 'str',
-    'name': 'str'
+    'name': 'str',
+    'Tool Name': 'str',
+    'Charged Wh': 'float',
+    'Discharged Wh': 'float',
+    'sum_duration': 'float'
 }
 for k, v in col_types.items():
     active_tools[k] = active_tools[k].astype(v)
@@ -108,16 +113,23 @@ with active_tools_cols[0]:
         gridOptions = gob.build(),
         update_on = ('modelUpdated', 500),
         key = 'active_tools',
-        fit_columns_on_grid_load = True
+        fit_columns_on_grid_load = False
     )
 
 with active_tools_cols[1]:
+    active_tools_plot_df = active_tools.copy()
+    active_tools_plot_df = active_tools_plot_df.sort_values(by = 'sum_duration', ascending = False)
+    active_tools_plot_df = active_tools_plot_df.drop(columns = ['schedule', 'gnss', 'gps'])
+
+    active_tools_plot = px.bar(
+        active_tools_plot_df,
+        x = 'Tool Name',
+        y = ['Discharged Wh', 'Charged Wh'],
+        barmode = 'group',
+        title = f'Active Tools {start_date} to {end_date}'
+    )
     st.plotly_chart(
-        px.bar(
-            active_tools.sort_values(by = 'sum_duration', ascending = True),
-            x = 'Tool Name',
-            y = 'sum_duration'
-        )
+        active_tools_plot
     )
 
 if active_tools_selection.selected_data is None:
@@ -184,12 +196,13 @@ with usage_by_day_cols[1]:
         data_by_date.sort_values(by = 'date', ascending = True),
         x = 'date',
         y = ['Energy Wh Discharged', 'Energy Wh Charged'],
-        barmode = 'group'
+        barmode = 'group',
+        title = f'Usage by Day: {selected_tool['brand']} {selected_tool['model']} {selected_tool['SN']}'
     )
     # usage_by_day_bar.update_xaxes(type = 'category')
     usage_by_day_bar.update_xaxes(
         dtick = "D1",  # Set tick interval to 1 day
-        tickformat = "%Y-%m-%d"  # Format tick labels as YYYY-MM-DD
+        tickformat = "%Y-%m-%d %a"  # Format tick labels as YYYY-MM-DD
     )
     st.plotly_chart(
         usage_by_day_bar
@@ -311,18 +324,7 @@ with events_plot_cols[0]:
         options = df.columns.tolist(),
         default = 'current (A)'
     )
-    plot_color_cols = st.columns(2)
-    with plot_color_cols[0]:
-        plot_color = st.selectbox(
-            'Color by variable',
-            options = [None] + df.columns.tolist(),
-        )
-    with plot_color_cols[1]:
-        color_scale = st.selectbox(
-            'Color scale',
-            options = px.colors.named_colorscales(),
-            index = px.colors.named_colorscales().index('temps')
-        )
+
     resample_rate = st.segmented_control(
         'Resample rate',
         options = ['Original', 0.1, 0.5, 1, 5, 10],
@@ -330,7 +332,6 @@ with events_plot_cols[0]:
         selection_mode = 'single'
     )
 
-    x_var = 't (s)'
 
 with events_plot_cols[1]:
     with st.spinner('Plotting data...', show_time = True):
@@ -342,10 +343,10 @@ with events_plot_cols[1]:
             df_resample = df_resample.resample(f'{float(resample_rate)}s', on = 'timedelta').max()
 
         # avoid huge plots that freeze the client
-        max_num_points = 1.5e5
+        max_num_points = 1.0e5
         resample_rate_increment = 0.1
         resample_rate_override = resample_rate
-        while df_resample[x_var].size * len(plot_vars) > max_num_points:
+        while df_resample['t (s)'].size * len(plot_vars) > max_num_points:
             if not isinstance(resample_rate_override, float):
                 resample_rate_override = 0.0
             resample_rate_override = round(float(resample_rate_override) + resample_rate_increment, 2)
@@ -356,16 +357,49 @@ with events_plot_cols[1]:
         if resample_rate_override != resample_rate:
             st.write(f'Resample rate increased to {resample_rate_override}s to maintain plotting speed')
 
-        line_plot = px.scatter(
-            df_resample,
-            x = 'time',
-            y = plot_vars,
-            color = plot_color,
-            color_continuous_scale = color_scale
-        )
-        line_plot.update_xaxes(tickformat = '%I:%M:%S %p')
+        x_var = 'time'
+
+        fig = plotly.graph_objs.Figure()
+
+        for plot_var in plot_vars:
+            fig.add_scatter(
+                x = df_resample[x_var],
+                y = df_resample[plot_var],
+                name = plot_var,
+                mode = 'lines',
+            )
+
+            if False:
+                df_for_decomp = df_resample.copy()
+                df_for_decomp = df_for_decomp.dropna(axis = 'rows')
+                decomp_period = math.floor(len(df_for_decomp.index) / 10)
+                decomp_period = min(decomp_period, 365*24*60)
+                decomposed = seasonal_decompose(
+                    x = df_for_decomp[plot_var],
+                    model = 'additive',
+                    period = decomp_period
+                )
+                fig.add_scatter(
+                    x = df_for_decomp[x_var],
+                    y = decomposed.trend,
+                    name = f'{plot_var} trend',
+                    mode = 'lines',
+                )
+
+                fig.add_scatter(
+                    x = df_for_decomp[x_var],
+                    y = decomposed.seasonal + decomposed.resid,
+                    name = f'{plot_var} s+r',
+                    mode = 'lines',
+                )
+
+        # add vertical line for each event beginning
+        for index, ev in events_data_selection.selected_data.iterrows():
+            fig.add_vline(x = ev['Time (local)'], line_width = 1, line_dash = "dot", line_color = "#dbdbdb")
+
+        fig.update_xaxes(tickformat = '%I:%M:%S %p')
         st.plotly_chart(
-            line_plot
+            fig
         )
 
         hist_vars = st.multiselect(
