@@ -53,7 +53,7 @@ def get_link_by_name(name):
     matches = df[df['devicename'].str.contains(name)]
     if len(matches.index) == 1:
         result = matches.to_dict(orient = 'records')[0]
-        print(f'get_link_by_name name={name} {result}')
+        # print(f'get_link_by_name name={name} {result}')
         return result
 
     if len(matches.index) > 1:
@@ -69,7 +69,7 @@ def get_link_by_name(name):
 def link_last_location(name = None, deviceid = None):
     if name:
         link = get_link_by_name(name)
-        print(f'link_last_location name={name} {link}')
+        # print(f'link_last_location name={name} {link}')
         if not link:
             print(f'link_last_location could not find link with name={name}')
         deviceid = link['deviceid']
