@@ -125,6 +125,11 @@ class DB_Handler():
 			'what': data,
 			'when': datetime.datetime.now()
 		}
+		if st.session_state.get('authentication_status'):
+			hist.update({
+				'who': st.session_state.get("name")
+			})
+
 		self.db[collection].update_one({'_id': ObjectId(_id)}, {'$set': data, '$push': {'history': hist}})
 		self.t_last_op = time.time()
 		return
