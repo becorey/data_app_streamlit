@@ -7,6 +7,7 @@ import time
 import datetime
 import pytz
 import plotly.express as px
+import geopy
 
 import hologram
 
@@ -18,6 +19,15 @@ def user_format_func(users, id):
     user = user.iloc[0]
     user = user.fillna('')
     return f"{user['name']} ({user['company']})"
+
+
+def user_name_from_schedule(users, schedule):
+    print(schedule)
+    if not isinstance(schedule, list):
+        return ''
+    if len(schedule) <= 0:
+        return ''
+    return schedule[-1]['User']
 
 
 st.title("Tools")
@@ -34,9 +44,8 @@ users = db.df(db.users.find())
 users['_id'] = users['_id'].astype(str)
 users = users.sort_values('name').reset_index()
 
-tools_data['User Name'] = tools_data['user'].apply(lambda x: user_format_func(users, x))
+tools_data['User Name'] = tools_data['schedule'].apply(lambda x: user_name_from_schedule(users, x))
 tools_data['Last Updated'] = tools_data['history'].apply(lambda x: x[-1]['when'].strftime('%m-%d-%Y %I:%M:%S %p') if len(x) > 0 else '')
-tools_data = tools_data.drop(columns = ['history'])
 
 gob = st_aggrid.GridOptionsBuilder.from_dataframe(tools_data)
 gob.configure_default_column(
@@ -73,7 +82,7 @@ with tool_cols[0]:
         st.toast('Added new tool')
         st.rerun()
 
-if event.selected_data is None:
+if event.selected_data is None or event.selected_data.empty:
     st.stop()
 
 tool = event.selected_data.iloc[0]
@@ -90,6 +99,10 @@ for text_field in text_fields:
 if 'schedule' not in tool or isinstance(tool['schedule'], float):
     tool['schedule'] = [{'User': '', 'Start Date': None, 'End Date': None, 'Timezone': ''}]
 
+if 'history' not in tool: #  or not isinstance(tool['history'], list)
+    tool['history'] = list()
+tool['history'] = ast.literal_eval(tool['history'])
+
 tool = tool.fillna('')
 tool = tool.replace({None: ''})
 
@@ -105,7 +118,9 @@ with tool_cols[0]:
     if tool['hotspot']:
         lat_long = hologram.link_last_location(name = tool['hotspot'])
         if lat_long:
-            st.subheader('Latest Hotspot Location')
+            geolocator = geopy.Nominatim(user_agent = "chervon_data_app")
+            location = geolocator.reverse(f"{lat_long['latitude']},{lat_long['longitude']}")
+            st.subheader(f'Latest Location: {location}')
             df = pd.DataFrame(
                 [lat_long]
             )
@@ -179,19 +194,6 @@ with tool_cols[1]:
         for text_field in text_fields:
             vals[text_field] = st.text_input(text_field, value = tool[text_field])
 
-        match_list = users[users['_id'] == tool['user']].index.tolist()
-        if tool['user'] and len(match_list) > 0:
-            user_index = match_list[0]
-        else:
-            user_index = None
-
-        vals['user'] = st.selectbox(
-            'user',
-            users['_id'],
-            format_func = lambda x: user_format_func(users, x),
-            index = user_index
-        )
-
         vals['timezone'] = st.selectbox(
             'timezone',
             timezones,
@@ -218,3 +220,14 @@ with tool_cols[1]:
             st.toast('Tool info updated', icon = ':material/task:')
 
             st.rerun()
+
+    with st.expander('Change history'):
+        for row in tool['history'][::-1]:
+            when = datetime.datetime.strptime(row['when'], "%Y-%m-%dT%H:%M:%S.%f")
+            with st.container():
+                cols = st.columns([.3, .7])
+                with cols[0]:
+                    st.write(when.strftime('%Y-%m-%d %a'))
+                    st.write(when.strftime('%I:%M:%S %p'))
+                with cols[1]:
+                    st.table(row['what'])
