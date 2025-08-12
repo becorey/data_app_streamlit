@@ -2,6 +2,7 @@ import streamlit as st
 from st_keyup import st_keyup
 import st_aggrid
 import datetime
+import ast
 
 st.title("Users")
 
@@ -25,12 +26,11 @@ gob.configure_default_column(
 
 sel_index = None
 if 'new_user_id' in st.session_state:
-    st.write('new_user_id', st.session_state['new_user_id'])
     sel_index = users_data[users_data['_id'] == str(st.session_state['new_user_id'])].index.tolist()
     if len(sel_index) > 0:
         sel_index = sel_index[0]
-        st.write(users_data.iloc[sel_index])
-    st.write('sel_index', sel_index)
+
+
 gob.configure_selection('single', use_checkbox = False, pre_selected_rows = sel_index)
 
 columns_to_hide = ['history'] #  '_id',
@@ -53,18 +53,22 @@ with user_cols[0]:
         new_id = db.insert(
             'users',
             {
-                'description': f'New, added {datetime.datetime.today().strftime('%m-%d-%Y %H:%M:%S')}'
+                'description': f'Added {datetime.datetime.today().strftime('%m-%d-%Y %H:%M:%S')}'
             }
         )
         st.session_state['new_user_id'] = str(new_id)
         st.toast('Added new user')
         st.rerun()
 
-if event.selected_data is None:
+if event.selected_data is None or event.selected_data.empty:
     st.stop()
 
 user = event.selected_data.iloc[0]
 user = user.replace('nan', '')
+
+if 'history' not in user:
+    user['history'] = list()
+user['history'] = ast.literal_eval(user['history'])
 
 with user_cols[1]:
     with st.form('users_form') as form:
@@ -74,7 +78,7 @@ with user_cols[1]:
 
         text_fields = [
             'name', 'address', 'phone', 'email',
-            'hotspot', 'company', 'description'
+            'company', 'description'
         ]
         for text_field in text_fields:
             vals[text_field] = st.text_input(text_field, value = user[text_field])
@@ -98,3 +102,15 @@ with user_cols[1]:
                 unsafe_allow_html = True
             )
             st.toast(f'Updated info for {user['name']}', icon = ':material/person_add:')
+            st.rerun()
+
+    with st.expander('Change history'):
+        for row in user['history'][::-1]:
+            when = datetime.datetime.strptime(row['when'], "%Y-%m-%dT%H:%M:%S.%f")
+            with st.container():
+                cols = st.columns([.3, .7])
+                with cols[0]:
+                    st.write(when.strftime('%Y-%m-%d %a'))
+                    st.write(when.strftime('%I:%M:%S %p'))
+                with cols[1]:
+                    st.table(row['what'])
